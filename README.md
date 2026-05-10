@@ -1,7 +1,9 @@
+
 # ChatAFL — LLM Guided Protocol Fuzzing
 
-Reproduction project for the NDSS 2024 research paper **"Large Language Model guided Protocol Fuzzing"**.  
-Original repository: https://github.com/ChatAFLndss/ChatAFL
+Implementation project for the NDSS 2024 research paper **"Large Language Model guided Protocol Fuzzing"**.  
+Original Implementation: https://github.com/ChatAFLndss/ChatAFL
+Research Paper Link:https://www.ndss-symposium.org/ndss-paper/large-language-model-guided-protocol-fuzzing/
 
 ---
 
@@ -24,11 +26,8 @@ Original repository: https://github.com/ChatAFLndss/ChatAFL
 | Server | Protocol | Description |
 |--------|----------|-------------|
 | pure-ftpd | FTP | File Transfer Protocol |
-| proftpd | FTP | Alternative FTP server |
 | live555 | RTSP | Real-time streaming |
 | kamailio | SIP | VoIP / internet calling |
-| exim | SMTP | Email transfer |
-| lighttpd | HTTP | Web server |
 
 ---
 
@@ -47,20 +46,20 @@ Expected result: AFLNet < CL1 < CL2 < ChatAFL in coverage.
 
 ## Requirements
 
-- Ubuntu 20.04 or 22.04
-- Docker
+- Any Operating System (Windows, Linux, MacOS)
+- Docker Installed
 - Python 3 with matplotlib and pandas
 - A free Groq API key — sign up at https://console.groq.com (no credit card needed)
-- At least 30 GB free disk space and 8 GB RAM
+- At least 20 GB free disk space and 4/8 GB RAM Minimum.
 
 ---
 
 ## Setup
 
-### 1. Clone the repository
+### 1. Clone this repository
 
 ```bash
-git clone https://github.com/ChatAFLndss/ChatAFL.git
+git clone https://github.com/akshaymina/CNS_Project_1661.git
 cd ChatAFL
 ```
 
@@ -80,21 +79,6 @@ sudo usermod -aG docker $USER
 newgrp docker
 ```
 
-### 3. Apply the code changes
-
-See the **Code Changes** section below, then copy the fixed files:
-
-```bash
-cp chat-llm.c ChatAFL/chat-llm.c
-cp chat-llm.h ChatAFL/chat-llm.h
-
-cp chat-llm.c ChatAFL-CL1/chat-llm.c
-cp chat-llm.h ChatAFL-CL1/chat-llm.h
-
-cp chat-llm.c ChatAFL-CL2/chat-llm.c
-cp chat-llm.h ChatAFL-CL2/chat-llm.h
-```
-
 ### 4. Set your Groq API key
 
 ```bash
@@ -108,7 +92,7 @@ chmod +x setup.sh
 KEY=$GROQ_API_KEY ./setup.sh
 ```
 
-This takes approximately 40 minutes. Docker caches completed steps, so if it fails partway through just re-run the same command.
+This setup process will take approximately 40 to 50 minutes depending on your hardware.
 
 ### 6. Verify images were built
 
@@ -166,9 +150,9 @@ Output graphs are saved in `res_<target>_<timestamp>/` folders as PNG files:
 
 ---
 
-## Code Changes
+## Major Code Changes
 
-The original implementation uses OpenAI's paid API. This project replaces it with the **Groq free API** using the `llama-3.3-70b-versatile` model. Three bugs were also fixed in the process.
+The original implementation uses OpenAI's paid API. This project replaces it with the **Groq free API** using the `llama-3.3-70b-versatile` model.
 
 ### chat-llm.h
 
@@ -240,17 +224,7 @@ All changes must be applied to `chat-llm.c` and `chat-llm.h` in all three folder
 
 ---
 
-## Common Errors
 
-| Error | Cause | Fix |
-|-------|-------|-----|
-| `permission denied` on docker | User not in docker group | `sudo usermod -aG docker $USER` then log out and back in |
-| HTTP 401 from API | Wrong or missing Groq key | Check `echo $GROQ_API_KEY` is set correctly |
-| Container exits immediately | API failure inside Docker | Run `docker logs <id>` to see the actual error |
-| `setup.sh` fails halfway | Network issue during build | Re-run `KEY=$GROQ_API_KEY ./setup.sh` — Docker resumes from cache |
-| No plots after analyze.sh | Results not ready | Make sure `run.sh` fully completed first |
-
----
 
 ## Cleanup
 
@@ -261,11 +235,4 @@ chmod +x clean.sh
 
 Removes all containers and frees disk space.
 
----
-
-## References
-
-- Meng R., Mirchev M., Bohme M., Roychoudhury A. *"Large Language Model guided Protocol Fuzzing."* NDSS 2024.
-- Pham V.T., Bohme M., Roychoudhury A. *"AFLNet: A Greybox Fuzzer for Network Protocols."* ICST 2020.
-- Natella R., Bohme M. *"ProFuzzBench: A Benchmark for Stateful Protocol Fuzzing."* ISSTA 2021.
 
