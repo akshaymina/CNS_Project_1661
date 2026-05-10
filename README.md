@@ -1,187 +1,271 @@
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.10115151.svg)](https://doi.org/10.5281/zenodo.10115151)
+# ChatAFL — LLM Guided Protocol Fuzzing
 
-# ChatAFL Artifact
+Reproduction project for the NDSS 2024 research paper **"Large Language Model guided Protocol Fuzzing"**.  
+Original repository: https://github.com/ChatAFLndss/ChatAFL
 
-<img align="right" src="https://github.com/ChatAFLndss/ChatAFL/assets/7456946/266f7d4f-c0af-4846-9e13-064e79c812b0">
+---
 
+## What This Is
 
-ChatAFL is a protocol fuzzer guided by large language models (LLMs). It is built on top of [AFLNet](https://github.com/aflnet/aflnet) but integrates with three concrete components. Firstly, the fuzzer uses the LLM to extract a machine-readable grammar for a protocol that is used for structure-aware mutation. Secondly, the fuzzer uses the LLM to increase the diversity of messages in the recorded message sequences that are used as initial seeds. Lastly, the fuzzer uses the LLM to break out of a coverage plateau, where the LLM is prompted to generate messages to reach new states. 
+**Fuzzing** is an automated security testing technique that sends large numbers of random inputs to a program and watches for crashes. Each crash is a potential vulnerability.
 
-The ChatAFL artifact is configured within [ProfuzzBench](https://github.com/profuzzbench/profuzzbench), a widely-used benchmark for stateful fuzzing of network protocols. This allows for smooth integration with an already established format.
+**Protocol fuzzing** applies this to networked servers (FTP, HTTP, email servers, etc.). The challenge is that these servers are *stateful* — they only accept messages in a specific order. A fuzzer must send valid message sequences, not random bytes.
 
-## Folder structure
+**ChatAFL** improves on the existing state-of-the-art tool (AFLNet) by using a Large Language Model to:
 
-```
-ChatAFL-Artifact
-├── aflnet: a modified version of AFLNet which outputs states and state transitions 
-├── analyse.sh: analysis script 
-├── benchmark: a modified version of ProfuzzBench, containing only text-based protocols with the addition of Lighttpd 1.4 
-├── clean.sh: clean script
-├── ChatAFL: the source code of ChatAFL, with all strategies proposed in the paper
-├── ChatAFL-CL1: ChatAFL, which only uses the structure-aware mutations (c.f. Ablation study) 
-├── ChatAFL-CL2: ChatAFL, which only uses the structure-aware and initial seed enrichment (c.f. Ablation study)
-├── deps.sh: the script to install dependencies, asks for the password when executed
-├── README: this file
-├── run.sh: the execution script to run fuzzers on subjects and collect data
-└── setup.sh: the preparation script to set up docker images
-```
+1. **Extract the protocol grammar** — so mutations stay structurally valid instead of being immediately rejected
+2. **Enrich the seed corpus** — ask the LLM what message types are missing and add them
+3. **Break coverage stalls** — when the fuzzer gets stuck, ask the LLM for a message that leads to a new server state
 
-## Citing ChatAFL
+---
 
-ChatAFL has been accepted for publication at the 31st Annual Network and Distributed System Security Symposium (NDSS) 2024. The paper is also available [here](https://mengrj.github.io/pdfs/chatafl.pdf). If you use this code in your scientific work, please cite the paper as follows:
+## Protocols and Servers Tested
 
-```
-@inproceedings{chatafl,
-author={Ruijie Meng and Martin Mirchev and Marcel B\"{o}hme and Abhik Roychoudhury},
-title={Large Language Model guided Protocol Fuzzing},
-booktitle={Proceedings of the 31st Annual Network and Distributed System Security Symposium (NDSS)},
-year={2024},}
-```
+| Server | Protocol | Description |
+|--------|----------|-------------|
+| pure-ftpd | FTP | File Transfer Protocol |
+| proftpd | FTP | Alternative FTP server |
+| live555 | RTSP | Real-time streaming |
+| kamailio | SIP | VoIP / internet calling |
+| exim | SMTP | Email transfer |
+| lighttpd | HTTP | Web server |
 
-## 1. Setup and Usage
+---
 
-### 1.1. Installing Dependencies
+## Fuzzer Variants
 
-`Docker`, `Bash`, `Python3` with `pandas` and `matplotlib` libraries. We provide a helper script `deps.sh` which runs the required steps to ensure that all dependencies are provided:
+| Variant | Strategies Enabled |
+|---------|--------------------|
+| AFLNet | None (baseline) |
+| ChatAFL-CL1 | Grammar extraction only |
+| ChatAFL-CL2 | Grammar + seed enrichment |
+| ChatAFL | All three (full system) |
+
+Expected result: AFLNet < CL1 < CL2 < ChatAFL in coverage.
+
+---
+
+## Requirements
+
+- Ubuntu 20.04 or 22.04
+- Docker
+- Python 3 with matplotlib and pandas
+- A free Groq API key — sign up at https://console.groq.com (no credit card needed)
+- At least 30 GB free disk space and 8 GB RAM
+
+---
+
+## Setup
+
+### 1. Clone the repository
 
 ```bash
+git clone https://github.com/ChatAFLndss/ChatAFL.git
+cd ChatAFL
+```
+
+### 2. Install dependencies
+
+```bash
+chmod +x deps.sh
 ./deps.sh
 ```
 
-### 1.2. Preparing Docker Images [~40 minutes]
-
-Run the following command to set up all docker images, including the subjects with all fuzzers:
+If Docker is not installed automatically:
 
 ```bash
-KEY=<OPENAI_API_KEY> ./setup.sh
+curl -fsSL https://get.docker.com -o get-docker.sh
+sudo sh get-docker.sh
+sudo usermod -aG docker $USER
+newgrp docker
 ```
 
-The process is estimated to take about 40 minutes. OPENAI_API_KEY is your OpenAI key and please refer to [this](https://openai.com/) about how to obtain a key.
+### 3. Apply the code changes
 
-### 1.3. Running Experiments
-
-Utilize the `run.sh` script to run experiments. The command is as follows:
+See the **Code Changes** section below, then copy the fixed files:
 
 ```bash
- ./run.sh <container_number> <fuzzed_time> <subjects> <fuzzers>
+cp chat-llm.c ChatAFL/chat-llm.c
+cp chat-llm.h ChatAFL/chat-llm.h
+
+cp chat-llm.c ChatAFL-CL1/chat-llm.c
+cp chat-llm.h ChatAFL-CL1/chat-llm.h
+
+cp chat-llm.c ChatAFL-CL2/chat-llm.c
+cp chat-llm.h ChatAFL-CL2/chat-llm.h
 ```
 
-Where `container_number` specifies how many containers are created to run a single fuzzer on a particular subject (each container runs one fuzzer on one subject). `fuzzed_time` indicates the fuzzing time in minutes. `subjects` is the list of subjects under test, and `fuzzers` is the list of fuzzers that are utilized to fuzz subjects. For example, the command (`run.sh 1 5 pure-ftpd chatafl`) would create 1 container for the fuzzer ChatAFL to fuzz the subject pure-ftpd for 5 minutes. In a short cut, one can execute all fuzzers and all subjects by using the writing `all` in place of the subject and fuzzer list.
-
-When the script completes, in the `benchmark` directory a folder `result-<name of subject>` will be created, containing fuzzing results for each run.
-
-### 1.4. Analyzing Results
-
-The `analyze.sh` script is used to analyze data and construct plots illustrating the average code and state coverage over time for fuzzers on each subject. The script is executed using the following command:
+### 4. Set your Groq API key
 
 ```bash
-./analyze.sh <subjects> <fuzzed_time> 
+export GROQ_API_KEY="gsk_your_key_here"
 ```
 
-The script takes in 2 arguments - `subjects` is the list of subjects under test and `fuzzed_time` is the duration of the run to be analyzed. Note that, the second argument is optional and the script by default will assume that the execution time is 1440 minutes, which is equal to 1 day. For example, the command (`analyze.sh exim 240`) will analyze the first 4 hours of the execution results of the exim subject.
-
-Upon completion of execution, the script will process the archives by construcing csv files, containing the covered number of branches, states, and state transitions over time. Furthermore, these csv files will be processed into PNG files which are plots, illustrating the average code and state coverage over time for fuzzers on each subject (`cov_over_time...` for the code and branch coverage, `state_over_time...` for the state and state transition coverage). All of this information is moved to a `res_<subject name>` folder in the root directory with a timestamp.
-
-### 1.5. Cleaning Up
-
-When the evaluation of the artifact is completed, running the `clean.sh` script will ensure that the only leftover files are in this directory:
+### 5. Build Docker images
 
 ```bash
-./clean.sh
+chmod +x setup.sh
+KEY=$GROQ_API_KEY ./setup.sh
 ```
 
-## 2. Functional Analysis
+This takes approximately 40 minutes. Docker caches completed steps, so if it fails partway through just re-run the same command.
 
-### 2.1. Examining LLM-generated Grammars
+### 6. Verify images were built
 
-The source code for the grammar generation is located in the function `setup_llm_grammars` in `afl-fuzz.c` with helper functions in `chat-llm.c`.
+```bash
+docker images | grep -E "chatafl|aflnet"
+```
 
-The responses of the LLM for the grammar generation can be found in the `protocol-grammars` directory in the resulting archive of a run.
+You should see one image per fuzzer per target server.
 
-### 2.2. Examining Enriched Seeds
+---
 
-The source code for the seed enrichment is located in the function `get_seeds_with_messsage_types` in `afl-fuzz.c` with helper functions in `chat-llm.c`.
+## Running Experiments
 
-The enriched seeds can be found in the seed `queue` directory in the resulting archive of a run. These files have the name `id:...,orig:enriched_`.
+### Quick test (5 minutes)
 
-### 2.3. Examining State-stall Responses
+```bash
+./run.sh 1 5 pure-ftpd chatafl
+```
 
-The source code for the state stall processing is located in the function `fuzz_one` and starts at line 6846 (`if (uninteresting_times >= UNINTERESTING_THRESHOLD && chat_times < CHATTING_THRESHOLD){`).
-
-The state stall prompts and their corresponding responses can be found in the `stall-interactions` directory in the resulting archive of a run. The files are of the form `request-<id>` and `response-<id>`, containing the request we have constructed and the response from the LLM.
-
-
-## 3. Reproduction Results
-
-To conduct the experiments outlined in the paper, we utilized a vast amount of resources. It is impractical to replicate all the experiments within a single day using a standard desktop machine. To facilitate the evaluation of the artifact, we downsized our experiments, employing fewer fuzzers, subjects, and iterations.
-
-### 3.1. Comparison with Baselines [5 human-minutes + 180 compute-hours]
-
-ChatAFL can cover more states and code, and achieve the same state and code coverage faster than the baseline tool AFLNet. We run the following commands to support these claims:
+### Main comparison experiment (4 hours)
 
 ```bash
 ./run.sh 5 240 kamailio,pure-ftpd,live555 chatafl,aflnet
-./analyze.sh kamailio,pure-ftpd,live555 240
 ```
 
-Upon completion of the commands, a folder prefixed with `res_` will be generated. This folder contains PNG files illustrating the state and code covered by two fuzzers over time as well as the output archives from all the runs. It will be placed in the root directory of the artifact.
-
-### 3.2. Ablation Study [5 human-minutes + 180 compute-hours]
-
-Each strategy proposed in ChatAFL contributes to varying degrees of improvement in code coverage. We run the following commands to support this claim:
+### Ablation study (4 hours)
 
 ```bash
 ./run.sh 5 240 proftpd,exim chatafl,chatafl-cl1,chatafl-cl2
+```
+
+Arguments: `./run.sh <repetitions> <minutes> <targets> <fuzzers>`
+
+Monitor running containers:
+
+```bash
+watch docker ps
+docker logs -f <container_id>
+```
+
+---
+
+## Analyzing Results
+
+```bash
+chmod +x analyze.sh
+./analyze.sh kamailio,pure-ftpd,live555 240
 ./analyze.sh proftpd,exim 240
 ```
 
-Upon completion of the commands, a folder prefixed with `res_` will be generated. This folder contains PNG files illustrating the code covered by three fuzzers over time as well as the output archives from all the runs. It will be placed in the root directory of the artifact.
+Output graphs are saved in `res_<target>_<timestamp>/` folders as PNG files:
 
-## 4. Customization
+- `cov_over_time_<target>.png` — branch coverage over time
+- `state_over_time_<target>.png` — protocol states discovered over time
 
-### 4.1. Enhancing or experimenting with ChatAFL
+---
 
-If a modification is done to any of the fuzzers, re-executing `setup.sh` will rebuild all the images with the modified version. All provided versions of ChatAFL contain a Dockerfile, allowing for the checking of build failures in the same environment as the one for the subjects and having a clean image, where one can setup different subjects.
+## Code Changes
 
-### 4.2. Tuning fuzzer parameters
+The original implementation uses OpenAI's paid API. This project replaces it with the **Groq free API** using the `llama-3.3-70b-versatile` model. Three bugs were also fixed in the process.
 
-All parameters, used in the experiments are located in `config.h` and `chat-llm.h`. The parameters, specific to ChatAFL are:
+### chat-llm.h
 
-In `config.h`:
+**Change 1 — Remove hardcoded fake API token**
 
-* EPSILON_CHOICE
-* UNINTERESTING_THRESHOLD
-* CHATTING_THRESHOLD  
+```c
+// BEFORE (causes HTTP 401 on every API call):
+#define OPENAI_TOKEN "1"
 
-In `chat-llm.h`:
+// AFTER:
+/* API key is read at runtime via getenv("GROQ_API_KEY") in chat-llm.c */
+```
 
-* STALL_RETRIES
-* GRAMMAR_RETRIES
-* MESSAGE_TYPE_RETRIES
-* ENRICHMENT_RETRIES
-* MAX_ENRICHMENT_MESSAGE_TYPES
-* MAX_ENRICHMENT_CORPUS_SIZE
+### chat-llm.c
 
-### 4.3. Adding new subjects
+**Change 2 — Read API key from environment at runtime**
 
-To add an extra subject, we refer to [the instructions, provied by ProfuzzBench](https://github.com/profuzzbench/profuzzbench#1-how-do-i-extend-profuzzbench) for adding a new benchmark subject. As an example, we have added Lighttpd 1.4 as a new subject to the benchmark.
+```c
+// BEFORE:
+char *auth_header = "Authorization: Bearer " OPENAI_TOKEN;
 
-### 4.4. Troubleshooting
+// AFTER:
+const char *groq_api_key = getenv("GROQ_API_KEY");
+if (groq_api_key == NULL || strlen(groq_api_key) == 0) {
+    printf("[ChatAFL] ERROR: GROQ_API_KEY environment variable is not set!\n");
+    return NULL;
+}
+char *auth_header = NULL;
+asprintf(&auth_header, "Authorization: Bearer %s", groq_api_key);
+```
 
-If the fuzzer terminates with an error, a premature "I am done" message will be displayed. To examine this issue, running `docker logs <containerID>` will display the logs of the failing container.
+**Change 3 — Fix swapped arguments and hardcode the Groq model**
 
-### 4.5. Working on GPT-4
+```c
+// BEFORE (prompt in model slot, int MAX_TOKENS passed as %s = crash):
+asprintf(&data,
+    "{\"model\": \"%s\", \"messages\": [{\"role\": \"user\", \"content\": \"%s\"}], \"max_tokens\": %d, \"temperature\": 0}",
+    prompt, MAX_TOKENS, temperature);
 
-We have released a new version of ChatAFL utilizing GPT-4: [gpt4-version](https://github.com/ChatAFLndss/ChatAFL/tree/gpt4-version). However, it hasn't been extensively tested yet. Please feel free to reach out if you encounter any issues during use.
+// AFTER:
+asprintf(&data,
+    "{\"model\": \"llama-3.3-70b-versatile\", \"messages\": [{\"role\": \"user\", \"content\": \"%s\"}], \"max_tokens\": %d, \"temperature\": %f}",
+    prompt, MAX_TOKENS, temperature);
+```
 
-## 5. Limitations
+**Change 4 — Fix response parsing to match Groq's format**
 
-The current artifact interacts with OpenAI's Large Language Models (`gpt-3.5-turbo-instruct` and `gpt-3.5-turbo`). This puts a third-party limit to the degree of parallelization. The models used in this artifact have a hard limit of 150,000 tokens per minute.
+```c
+// BEFORE (reads choices[0].text — old OpenAI completions format, doesn't exist in Groq):
+json_object *jobj4 = json_object_object_get(first_choice, "text");
+data = json_object_get_string(jobj4);
 
-## 6. Special Thanks
+// AFTER (reads choices[0].message.content — correct for chat completions):
+json_object *jobj4 = json_object_object_get(first_choice, "message");
+json_object *jobj5 = json_object_object_get(jobj4, "content");
+data = json_object_get_string(jobj5);
+```
 
-We would like to thank the creators of [AFLNet](https://github.com/aflnet/aflnet) and [ProFuzzBench](https://github.com/profuzzbench/profuzzbench) for the tooling and infrastructure they have provided to the community.
+**Change 5 — Free the dynamically allocated auth header**
 
-## 7. License
+```c
+// Add this before the existing free(data):
+if (auth_header != NULL) {
+    free(auth_header);
+}
+```
 
-This artifact is licensed under the Apache License 2.0 - see the [LICENSE](./LICENSE) file for details.
+All changes must be applied to `chat-llm.c` and `chat-llm.h` in all three folders: `ChatAFL/`, `ChatAFL-CL1/`, and `ChatAFL-CL2/`. The files are identical across all three — the same fixed copy works for all.
+
+---
+
+## Common Errors
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `permission denied` on docker | User not in docker group | `sudo usermod -aG docker $USER` then log out and back in |
+| HTTP 401 from API | Wrong or missing Groq key | Check `echo $GROQ_API_KEY` is set correctly |
+| Container exits immediately | API failure inside Docker | Run `docker logs <id>` to see the actual error |
+| `setup.sh` fails halfway | Network issue during build | Re-run `KEY=$GROQ_API_KEY ./setup.sh` — Docker resumes from cache |
+| No plots after analyze.sh | Results not ready | Make sure `run.sh` fully completed first |
+
+---
+
+## Cleanup
+
+```bash
+chmod +x clean.sh
+./clean.sh
+```
+
+Removes all containers and frees disk space.
+
+---
+
+## References
+
+- Meng R., Mirchev M., Bohme M., Roychoudhury A. *"Large Language Model guided Protocol Fuzzing."* NDSS 2024.
+- Pham V.T., Bohme M., Roychoudhury A. *"AFLNet: A Greybox Fuzzer for Network Protocols."* ICST 2020.
+- Natella R., Bohme M. *"ProFuzzBench: A Benchmark for Stateful Protocol Fuzzing."* ISSTA 2021.
+
