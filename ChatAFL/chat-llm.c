@@ -50,23 +50,31 @@ char *chat_with_llm(char *prompt, char *model, int tries, float temperature)
     char *url = NULL;
     if (strcmp(model, "instruct") == 0)
     {
-        url = "https://api.openai.com/v1/completions";
+        url = "https://api.groq.com/openai/v1/chat/completions";
     }
     else
     {
-        url = "https://api.openai.com/v1/chat/completions";
+        url = "https://api.groq.com/openai/v1/chat/completions";
     }
-    char *auth_header = "Authorization: Bearer " OPENAI_TOKEN;
+    /* Read the Groq API key from the environment variable at runtime */
+    const char *groq_api_key = getenv("GROQ_API_KEY");
+    if (groq_api_key == NULL || strlen(groq_api_key) == 0) {
+        printf("[ChatAFL] ERROR: GROQ_API_KEY environment variable is not set!\n");
+        printf("[ChatAFL] Set it with: export GROQ_API_KEY=\"gsk_your_key_here\"\n");
+        return NULL;
+    }
+    char *auth_header = NULL;
+    asprintf(&auth_header, "Authorization: Bearer %s", groq_api_key);
     char *content_header = "Content-Type: application/json";
     char *accept_header = "Accept: application/json";
     char *data = NULL;
     if (strcmp(model, "instruct") == 0)
     {
-        asprintf(&data, "{\"model\": \"gpt-3.5-turbo-instruct\", \"prompt\": \"%s\", \"max_tokens\": %d, \"temperature\": %f}", prompt, MAX_TOKENS, temperature);
+        asprintf(&data, "{\"model\": \"llama-3.3-70b-versatile\", \"messages\": [{\"role\": \"user\", \"content\": \"%s\"}], \"max_tokens\": %d, \"temperature\": %f}", prompt, MAX_TOKENS, temperature);
     }
     else
     {
-        asprintf(&data, "{\"model\": \"gpt-3.5-turbo\",\"messages\": %s, \"max_tokens\": %d, \"temperature\": %f}", prompt, MAX_TOKENS, temperature);
+        asprintf(&data, "{\"model\": \"llama-3.3-70b-versatile\",\"messages\": %s, \"max_tokens\": %d, \"temperature\": %f}", prompt, MAX_TOKENS, temperature);
     }
     curl_global_init(CURL_GLOBAL_DEFAULT);
     do
@@ -103,11 +111,13 @@ char *chat_with_llm(char *prompt, char *model, int tries, float temperature)
                     json_object *first_choice = json_object_array_get_idx(choices, 0);
                     const char *data;
 
-                    // The answer begins with a newline character, so we remove it
+                    // Both "instruct" and chat paths use chat/completions on Groq,
+                    // so the response always has choices[0].message.content
                     if (strcmp(model, "instruct") == 0)
                     {
-                        json_object *jobj4 = json_object_object_get(first_choice, "text");
-                        data = json_object_get_string(jobj4);
+                        json_object *jobj4 = json_object_object_get(first_choice, "message");
+                        json_object *jobj5 = json_object_object_get(jobj4, "content");
+                        data = json_object_get_string(jobj5);
                     }
                     else
                     {
@@ -137,6 +147,11 @@ char *chat_with_llm(char *prompt, char *model, int tries, float temperature)
 
         free(chunk.memory);
     } while ((res != CURLE_OK || answer == NULL) && (--tries > 0));
+
+    if (auth_header != NULL)
+    {
+        free(auth_header);
+    }
 
     if (data != NULL)
     {
